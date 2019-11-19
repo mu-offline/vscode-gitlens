@@ -73,6 +73,7 @@ import { GitUri } from './gitUri';
 import { RemoteProviderFactory, RemoteProviders } from './remotes/factory';
 import { GitReflogParser, GitShortLogParser } from './parsers/parsers';
 import { isWindows } from './shell';
+import { PullRequestDateFormatting } from './models/models';
 
 export * from './gitUri';
 export * from './models/models';
@@ -253,6 +254,7 @@ export class GitService implements Disposable {
 		) {
 			BranchDateFormatting.reset();
 			CommitDateFormatting.reset();
+			PullRequestDateFormatting.reset();
 		}
 	}
 

@@ -5,6 +5,7 @@ import { Logger } from '../../logger';
 import { Messages } from '../../messages';
 import { GitLogCommit } from '../models/logCommit';
 import { DynamicAutolinkReference } from '../../annotations/autolinks';
+import { PullRequest } from '../models/pullRequest';
 
 export enum RemoteResourceType {
 	Branch = 'branch',
@@ -140,6 +141,18 @@ export abstract class RemoteProvider {
 		}
 	}
 
+	get canSupportPullRequests(): boolean {
+		return this.enablePullRequests !== undefined && this.getPullRequestForCommit !== undefined;
+	}
+
+	async enablePullRequests?(): Promise<void>;
+
+	supportsPullRequests(): this is RemoteProviderWithPullRequests {
+		return false;
+	}
+
+	getPullRequestForCommit?(ref: string): Promise<PullRequest | undefined>;
+
 	open(resource: RemoteResource): Thenable<{} | undefined> {
 		return this.openUrl(this.url(resource));
 	}
@@ -172,4 +185,9 @@ export abstract class RemoteProvider {
 
 		return undefined;
 	}
+}
+
+export interface RemoteProviderWithPullRequests extends RemoteProvider {
+	enablePullRequests(): Promise<void>;
+	getPullRequestForCommit(ref: string): Promise<PullRequest | undefined>;
 }

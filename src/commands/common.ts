@@ -37,6 +37,7 @@ export enum Commands {
 	DiffWorkingWith = 'gitlens.diffWorkingWith',
 	// DEPRECATED
 	DiffWorkingWithBranch = 'gitlens.diffWorkingWithBranch',
+	EnablePullRequests = 'gitlens.enablePullRequests',
 	ExternalDiffAll = 'gitlens.externalDiffAll',
 	DiffWith = 'gitlens.diffWith',
 	// DEPRECATED

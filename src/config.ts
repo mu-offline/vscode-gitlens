@@ -43,6 +43,7 @@ export interface Config {
 		};
 		skipConfirmations: string[];
 	};
+	githubToken: string | null;
 	heatmap: {
 		ageThreshold: number;
 		coldColor: string;

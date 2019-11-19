@@ -1,8 +1,11 @@
 'use strict';
-import { Range } from 'vscode';
-import { RemoteProvider } from './provider';
+import { ConfigurationTarget, Range, window } from 'vscode';
+import { RemoteProvider, RemoteProviderWithPullRequests } from './provider';
 import { AutolinkReference } from '../../config';
 import { DynamicAutolinkReference } from '../../annotations/autolinks';
+import { Container } from '../../container';
+import { PullRequest } from '../models/pullRequest';
+import { configuration } from '../../configuration';
 
 const issueEnricher3rdParyRegex = /\b(\w+\\?-?\w+(?!\\?-)\/\w+\\?-?\w+(?!\\?-))\\?#([0-9]+)\b/g;
 
@@ -46,18 +49,34 @@ export class GitHubRemote extends RemoteProvider {
 		return this.formatName('GitHub');
 	}
 
-	// enrichMessage(message: string): string {
-	// 	return (
-	// 		message
-	// 			// Matches #123 or gh-123 or GH-123
-	// 			.replace(issueEnricherRegex, `$1[$2](${this.baseUrl}/issues/$3 "Open Issue $2")`)
-	// 			// Matches eamodio/vscode-gitlens#123
-	// 			.replace(
-	// 				issueEnricher3rdParyRegex,
-	// 				`[$&](${this.protocol}://${this.domain}/$1/issues/$2 "Open Issue #$2 from $1")`
-	// 			)
-	// 	);
-	// }
+	async enablePullRequests() {
+		const token = await window.showInputBox({
+			placeHolder: 'Generate a personal access token from github.com (required)',
+			prompt: 'Enter a GitHub personal access token',
+			validateInput: (value: string) => (value ? undefined : 'Must be a valid GitHub personal access token'),
+			ignoreFocusOut: true
+		});
+		if (!token) return;
+
+		await configuration.update('githubToken', token, ConfigurationTarget.Global);
+	}
+
+	private _prsByCommit = new Map<string, Promise<PullRequest | undefined>>();
+	async getPullRequestForCommit(ref: string): Promise<PullRequest | undefined> {
+		let pr = this._prsByCommit.get(ref);
+		if (pr === undefined) {
+			const [owner, repo] = this.splitPath();
+			pr = (await Container.github)?.getPullRequestForCommit(owner, repo, ref);
+			if (pr != null) {
+				this._prsByCommit.set(ref, pr);
+			}
+		}
+		return pr;
+	}
+
+	supportsPullRequests(): this is RemoteProviderWithPullRequests {
+		return Container.config.githubToken != null;
+	}
 
 	protected getUrlForBranches(): string {
 		return `${this.baseUrl}/branches`;

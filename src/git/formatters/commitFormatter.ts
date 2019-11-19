@@ -1,6 +1,7 @@
 'use strict';
 import {
 	DiffWithCommand,
+	EnablePullRequestsCommand,
 	InviteToLiveShareCommand,
 	OpenCommitInRemoteCommand,
 	OpenFileRevisionCommand,
@@ -10,7 +11,7 @@ import {
 import { DateStyle, FileAnnotationType } from '../../configuration';
 import { GlyphChars } from '../../constants';
 import { Container } from '../../container';
-import { GitCommit, GitLogCommit, GitRemote, GitService, GitUri } from '../gitService';
+import { GitCommit, GitLogCommit, GitRemote, GitService, GitUri, PullRequest } from '../gitService';
 import { Strings } from '../../system';
 import { FormatOptions, Formatter } from './formatter';
 import { ContactPresence } from '../../vsls/vsls';
@@ -24,9 +25,11 @@ const hasTokenRegexMap = new Map<string, RegExp>();
 export interface CommitFormatOptions extends FormatOptions {
 	annotationType?: FileAnnotationType;
 	dateStyle?: DateStyle;
+	enablePRSupportOnRemote?: GitRemote;
 	getBranchAndTagTips?: (sha: string) => string | undefined;
 	line?: number;
 	markdown?: boolean;
+	pr?: PullRequest;
 	presence?: ContactPresence;
 	previousLineDiffUris?: { current: GitUri; previous: GitUri | undefined };
 	remotes?: GitRemote[];
@@ -48,6 +51,11 @@ export interface CommitFormatOptions extends FormatOptions {
 		email?: Strings.TokenOptions;
 		id?: Strings.TokenOptions;
 		message?: Strings.TokenOptions;
+		pullRequest?: Strings.TokenOptions;
+		pullRequestAgo?: Strings.TokenOptions;
+		pullRequestAgoOrDate?: Strings.TokenOptions;
+		pullRequestDate?: Strings.TokenOptions;
+		pullRequestState?: Strings.TokenOptions;
 		tips?: Strings.TokenOptions;
 	};
 }
@@ -95,6 +103,20 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 		return dateStyle === DateStyle.Absolute ? this._date : this._dateAgo;
 	}
 
+	private get _pullRequestDate() {
+		return this._options.pr?.formatDate(this._options.dateFormat) ?? emptyStr;
+	}
+
+	private get _pullRequestDateAgo() {
+		return this._options.pr?.formatDateFromNow() ?? emptyStr;
+	}
+
+	private get _pullRequestDateOrAgo() {
+		const dateStyle =
+			this._options.dateStyle !== undefined ? this._options.dateStyle : Container.config.defaultDateStyle;
+		return dateStyle === DateStyle.Absolute ? this._pullRequestDate : this._pullRequestDateAgo;
+	}
+
 	get ago() {
 		return this._padOrTruncate(this._dateAgo, this._options.tokenOptions.ago);
 	}
@@ -129,21 +151,26 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 			return emptyStr;
 		}
 
-		let avatar = `![](${this._item
-			.getGravatarUri(Container.config.defaultGravatarsStyle)
-			.toString(true)}|width=16,height=16)`;
-
 		const presence = this._options.presence;
 		if (presence != null) {
 			const title = `${this._item.author} ${this._item.author === 'You' ? 'are' : 'is'} ${
-				presence.status === 'dnd' ? 'in ' : ''
+				presence.status === 'dnd' ? 'in ' : emptyStr
 			}${presence.statusText.toLocaleLowerCase()}`;
 
-			avatar += `![${title}](${getPresenceDataUri(presence.status)})`;
-			avatar = `[${avatar}](# "${title}")`;
+			return `${this._getGravatarMarkdown(title)}${this._getPresenceMarkdown(presence, title)}`;
 		}
 
-		return avatar;
+		return this._getGravatarMarkdown(this._item.author);
+	}
+
+	private _getGravatarMarkdown(title: string) {
+		return `![${title}](${this._item
+			.getGravatarUri(Container.config.defaultGravatarsStyle)
+			.toString(true)}|width=16,height=16 "${title}")`;
+	}
+
+	private _getPresenceMarkdown(presence: ContactPresence, title: string) {
+		return `![${title}](${getPresenceDataUri(presence.status)} "${title}")`;
 	}
 
 	get changes() {
@@ -180,11 +207,11 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 
 				commands += ` **[\`${GlyphChars.MuchLessThan}\`](${DiffWithCommand.getMarkdownCommandArgs({
 					lhs: {
-						sha: diffUris.previous.sha || '',
+						sha: diffUris.previous.sha || emptyStr,
 						uri: diffUris.previous.documentUri()
 					},
 					rhs: {
-						sha: diffUris.current.sha || '',
+						sha: diffUris.current.sha || emptyStr,
 						uri: diffUris.current.documentUri()
 					},
 					repoPath: this._item.repoPath,
@@ -205,6 +232,20 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 		commands = `[\`${this.id}\`](${ShowQuickCommitDetailsCommand.getMarkdownCommandArgs(
 			this._item.sha
 		)} "Show Commit Details") `;
+
+		const { pr } = this._options;
+		if (pr != null) {
+			commands += `[\`PR #${pr.number}\`](${pr.url} "Open Pull Request\n\\#${pr.number}\n${pr.title}\n${
+				pr.state
+			}, ${pr.formatDateFromNow()}") `;
+		} else {
+			const { enablePRSupportOnRemote } = this._options;
+			if (enablePRSupportOnRemote != null) {
+				commands += `[\`PR # <click to enable>\`](${EnablePullRequestsCommand.getMarkdownCommandArgs(
+					enablePRSupportOnRemote
+				)} "Enables the display of the Pull Request (if any) that introduced this commit") `;
+			}
+		}
 
 		commands += `**[\`${GlyphChars.MuchLessThan}\`](${DiffWithCommand.getMarkdownCommandArgs(
 			this._item,
@@ -312,6 +353,34 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 		return `\n> ${message}`;
 	}
 
+	get pullRequest() {
+		const { pr } = this._options;
+		if (pr == null) return emptyStr;
+
+		return this._padOrTruncate(
+			this._options.markdown
+				? `[PR #${pr.number}](${pr.url} "${pr.title}\n${pr.state}, ${pr.formatDateFromNow()}")`
+				: `PR #${pr.number}`,
+			this._options.tokenOptions.pullRequest
+		);
+	}
+
+	get pullRequestAgo() {
+		return this._padOrTruncate(this._pullRequestDateAgo, this._options.tokenOptions.pullRequestAgo);
+	}
+
+	get pullRequestAgoOrDate() {
+		return this._padOrTruncate(this._pullRequestDateOrAgo, this._options.tokenOptions.pullRequestAgoOrDate);
+	}
+
+	get pullRequestDate() {
+		return this._padOrTruncate(this._pullRequestDate, this._options.tokenOptions.pullRequestDate);
+	}
+
+	get pullRequestState() {
+		return this._padOrTruncate(this._options.pr?.state ?? emptyStr, this._options.tokenOptions.pullRequestState);
+	}
+
 	get sha() {
 		return this.id;
 	}
@@ -348,13 +417,3 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 		return regex.test(format);
 	}
 }
-
-// const autolinks = new Autolinks();
-// const text = autolinks.linkify(`\\#756
-// foo
-// bar
-// baz \\#756
-// boo\\#789
-// \\#666
-// gh\\-89 gh\\-89gh\\-89 GH\\-89`);
-// console.log(text);
